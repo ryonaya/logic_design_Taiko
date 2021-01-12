@@ -36,12 +36,16 @@ module top(
     wire [14-1:0] good_efx_pixel_addr, ok_efx_pixel_addr;   // 96*96 = 9216
     wire [11-1:0] good_pixel_addr;                          // 60*32 = 1920
     wire [10-1:0] ok_pixel_addr;                            // 60*32 = 1920
+    wire [14-1:0] ui_pixel_addr;                            // 128*96= 12288
+    wire [17-1:0] background_pixel_addr;                    // 76800
 
     wire [2-1:0]  pre_slide_pixel; 
     wire [12-1:0] slide_pixel, good_efx_pixel, good_pixel, ok_efx_pixel, ok_pixel, 
-                  do_pixel, ka_pixel;
+                  do_pixel, ka_pixel,
+                  ui_pixel, background_pixel;
     reg  [12-1:0] color;
 
+    wire ui;
     wire slide, good_efx, good, ok_efx, ok;
     wire [ 8-1:0] pre_do, pre_ka;
     wire do, ka;
@@ -183,7 +187,9 @@ module top(
     assign {vgaRed, vgaGreen, vgaBlue} = color;
     always @* begin         // Layering
         if(valid) begin
-            if     (do   && do_pixel != 12'hf6f)
+            if     (ui)
+                color = ui_pixel;
+            else if(do   && do_pixel != 12'hf6f)
                 color = do_pixel;
             else if(ka   && ka_pixel != 12'hf6f)
                 color = ka_pixel;
@@ -198,8 +204,7 @@ module top(
             else if(slide)
                 color = slide_pixel;
             else
-                color = 12'b0;
-                //color = background_pixel;
+                color = background_pixel;
         end
         else begin
             color = 12'b0;
@@ -245,6 +250,43 @@ module top(
     slide_pixel_decode      slide_decode(
         .pre_slide_pixel(pre_slide_pixel),
         .slide_pixel(slide_pixel)
+    );
+
+
+    /// <Background>
+    /// 
+    /// </Background>
+    background_mem_addr_gen      background_mem_addr_gen_inst(
+        .h_cnt(h_cnt),
+        .v_cnt(v_cnt),
+
+        .background_pixel_addr(background_pixel_addr)
+    );
+    blk_mem_gen_7           background_inst(
+        .clka(clk_25MHz),
+        .wea(0),
+        .addra(background_pixel_addr),
+        .dina(data),
+        .douta(background_pixel)
+    );
+
+
+    /// <UI>
+    /// 
+    /// </UI>
+    ui_mem_addr_gen      ui_mem_addr_gen_inst(
+        .h_cnt(h_cnt),
+        .v_cnt(v_cnt),
+
+        .ui(ui),
+        .ui_pixel_addr(ui_pixel_addr)
+    );
+    blk_mem_gen_8           ui_inst(
+        .clka(clk_25MHz),
+        .wea(0),
+        .addra(ui_pixel_addr),
+        .dina(data),
+        .douta(ui_pixel)
     );
 
 
@@ -369,7 +411,7 @@ endgenerate
         .dina(data),
         .douta(ok_pixel)
     );
-    blk_mem_gen_6           ok_inst(
+    blk_mem_gen_6           ok_efx_inst(
         .clka(clk_25MHz),
         .wea(0),
         .addra(ok_efx_pixel_addr),

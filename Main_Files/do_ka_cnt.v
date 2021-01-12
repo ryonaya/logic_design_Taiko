@@ -7,7 +7,6 @@ module do_ka_cnt(
 
     // 10 = ka, 11 = do
     parameter [0:32-1] note_list = 32'b11100010_11111010_10101110_00001010;
-    // parameter [0:32-1] note_list = 32'b11111111_11111111_11111111_11111111;
 
     /// Timer
     reg [5-1:0] counter;        // Count up every 2^n *(1/60) seconds, this signal last for a frame

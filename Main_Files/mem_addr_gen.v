@@ -3,7 +3,7 @@
 /// </Hi>
 
 /// Start at (128, 128), with a 64*64 gray circle's center located at (160, 160)
-module slide_mem_addr_gen (             /// 512 * 96 * 12
+module slide_mem_addr_gen (             /// 512 * 96 
     input [10-1:0] h_cnt,
     input [10-1:0] v_cnt,
     output          slide,
@@ -15,6 +15,32 @@ module slide_mem_addr_gen (             /// 512 * 96 * 12
               y2 = 10'd223;
     assign slide = ( (h_cnt >= x1 && h_cnt <= x2) && (v_cnt >= y1 && v_cnt <= y2) ) ? 1 : 0;
     assign slide_pixel_addr = (h_cnt - x1) + ( (v_cnt - y1) << 9 );
+endmodule
+
+
+module background_mem_addr_gen (             /// 320 * 240
+    input [10-1:0] h_cnt,
+    input [10-1:0] v_cnt,
+
+    output [17-1:0] background_pixel_addr
+);
+
+    assign background_pixel_addr = (h_cnt>>1) + ( (v_cnt>>1)*320 );
+endmodule
+
+
+module ui_mem_addr_gen (             /// 128 * 96
+    input [10-1:0] h_cnt,
+    input [10-1:0] v_cnt,
+    output          ui,
+    output [14-1:0] ui_pixel_addr
+);
+    parameter x1 = 10'd0,
+              y1 = 10'd128,
+              x2 = 10'd127,
+              y2 = 10'd223;
+    assign ui = ( (h_cnt >= x1 && h_cnt <= x2) && (v_cnt >= y1 && v_cnt <= y2) ) ? 1 : 0;
+    assign ui_pixel_addr = (h_cnt - x1) + ( (v_cnt - y1) << 7 );
 endmodule
 
 
@@ -180,10 +206,10 @@ module good_efx_mem_addr_gen (
                y = 165,     /// Center of "good efx"
                x1= 119,
                y1= 118,     /// For "good efx"
-               x2= 140,
+               x2= 141,
                y2= 112,
-               x3= 202,
-               y3= 142;     /// For "good"
+               x3= 200,
+               y3= 143;     /// For "good"
 
     wire [20-1:0] xx, yy;
     reg [7-1:0] counter;        // incline : 32/3 vsyncs, hold : N-32/3 vsyncs
@@ -205,7 +231,7 @@ module good_efx_mem_addr_gen (
         end
         else begin
             good_efx_pixel_addr <= (h_cnt - x1) + ((v_cnt - y1)*96);
-            good_pixel_addr <= (h_cnt - x2) + ((v_cnt - y2)*60) + 1;
+            good_pixel_addr <= (h_cnt - x2) + ((v_cnt - y2)*60);
         end
     end 
     always @* begin
@@ -229,6 +255,7 @@ module good_efx_mem_addr_gen (
     end
 endmodule
 
+
 module ok_mem_addr_gen (
     input clk, 
     input rst,
@@ -238,38 +265,61 @@ module ok_mem_addr_gen (
 
     input request,
 
-    output reg ok,
+    output reg ok_efx, ok,
+    output reg [14-1:0] ok_efx_pixel_addr,
     output reg [10-1:0] ok_pixel_addr
 );
 
-    localparam x1= 149,
-               y1= 108,
-               x2= 180,
-               y2= 139;     /// For "ok"
-
+    localparam x = 166, 
+               y = 165,     /// Center of "ok efx"
+               x1= 119,
+               y1= 118,     /// For "ok efx"
+               x2= 149,
+               y2= 108,
+               x3= 180,
+               y3= 139;     /// For "ok"
+    
+    wire [20-1:0] xx, yy;
     reg [7-1:0] counter;
     always @(posedge clk) begin
-        if(rst || counter >= 7'd12)
+        if(rst || counter >= 7'd60)
             counter <= 0;
         else if(vsync & request)
             counter <= 1;
         else if(vsync && counter > 0)
-            counter <= counter + 1;
+            counter <= counter + 6;
         else 
             counter <= counter;
     end
 
     always @(posedge clk) begin
-        if(rst) 
+        if(rst) begin
+            ok_efx_pixel_addr <= 0;
             ok_pixel_addr <= 0;
-        else 
-            ok_pixel_addr <= (h_cnt - x1) + ((v_cnt - y1)<<5);
+        end
+        else begin
+            ok_efx_pixel_addr <= (h_cnt - x1) + ((v_cnt - y1)*96);
+            ok_pixel_addr <= (h_cnt - x2) + ((v_cnt - y2)<<5); 
+        end
     end 
     always @* begin
-        if( (h_cnt >= x1 && h_cnt <= x2) && (v_cnt >= y1 && v_cnt <= y2) && counter > 0)
+        if( (h_cnt >= x2 && h_cnt <= x3) && (v_cnt >= y2 && v_cnt <= y3) && counter > 32)
             ok = 1;
         else 
             ok = 0;
+    end
+
+    assign xx = (h_cnt - x) * (h_cnt - x);
+    assign yy = (v_cnt - y) * (v_cnt - y);
+    always @(posedge clk) begin
+        if(rst) 
+            ok_efx <= 0;
+        else if(xx + yy < ((48+counter)>>1) * ((48+counter)>>1) && counter <= 48 && counter != 0)
+            ok_efx <= 1;
+        else if(xx + yy < 2304  && counter > 32)
+            ok_efx <= 1;
+        else
+            ok_efx <= 0;
     end
 
 endmodule
