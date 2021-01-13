@@ -81,21 +81,21 @@ module combo_mem_addr_gen (         /// 160 * 32 = (16 * 10) * 32
         if(v_cnt >= y1 && v_cnt <= y2) begin
             case({one_digit, two_digit, three_digit})
             3'b100  : begin
-                combo_pixel_addr = (h_cnt - num2_x1) + (v_cnt - y1) * 160 + (streak<<4);
+                combo_pixel_addr = (h_cnt - num2_x1) + (v_cnt - y1) * 160 + (streak<<4)+1;
             end
             3'b010  : begin
                 if(in4)
-                    combo_pixel_addr = (h_cnt - num4_x1) + (v_cnt - y1) * 160 + ((streak / 10)<<4);
+                    combo_pixel_addr = (h_cnt - num4_x1) + (v_cnt - y1) * 160 + ((streak / 10)<<4)+1;
                 else
-                    combo_pixel_addr = (h_cnt - num5_x1) + (v_cnt - y1) * 160 + ((streak % 10)<<4);
+                    combo_pixel_addr = (h_cnt - num5_x1) + (v_cnt - y1) * 160 + ((streak % 10)<<4)+1;
             end
             3'b001  : begin
                 if(in1)
-                    combo_pixel_addr = (h_cnt - num1_x1) + (v_cnt - y1) * 160 + ((streak / 100)<<4);
+                    combo_pixel_addr = (h_cnt - num1_x1) + (v_cnt - y1) * 160 + ((streak / 100)<<4)+1;
                 else if(in2)
-                    combo_pixel_addr = (h_cnt - num2_x1) + (v_cnt - y1) * 160 + ((streak % 100 / 10)<<4);
+                    combo_pixel_addr = (h_cnt - num2_x1) + (v_cnt - y1) * 160 + ((streak % 100 / 10)<<4)+1;
                 else
-                    combo_pixel_addr = (h_cnt - num3_x1) + (v_cnt - y1) * 160 + ((streak % 10)<<4);
+                    combo_pixel_addr = (h_cnt - num3_x1) + (v_cnt - y1) * 160 + ((streak % 10)<<4)+1;
             end
             default : begin
                 combo_pixel_addr = 0;
@@ -118,7 +118,7 @@ endmodule
 module do_mem_addr_gen #(               /// 64 * 64 * 12
     parameter H_SIZE = 10'd32,          // Half size
     parameter SPEED = 10'd2,            // Note speed
-    parameter NUM = 3'd0                // Which one
+    parameter NUM = 5'd0                // Which one
 )(                                      // x, y = slide x1 + 37, y1 + 12
     input clk, 
     input rst,
@@ -127,11 +127,11 @@ module do_mem_addr_gen #(               /// 64 * 64 * 12
     input [10-1:0] v_cnt,
     input do_cnt,           // 1 means on the track
     input been_hit,
-    input [ 4-1:0] init,    // Determine starting or not
+    input [ 5-1:0] init,    // Determine starting or not
 
     output expired,
     output do,
-    output good_hit, ok_hit,
+    output good_hit, ok_hit, bad_hit,
     output [12-1:0] do_pixel_addr
 );
 
@@ -245,9 +245,10 @@ module do_mem_addr_gen #(               /// 64 * 64 * 12
     /// Hit signals
     assign good_hit = (x > 10'd150 && x < 10'd175) && anim_cnt == 0;
     assign ok_hit   = ((x <=10'd150 && x > 10'd140) || (x >= 10'd175 && x < 10'd185) && anim_cnt == 0);
+    assign bad_hit  = (x >= 10'd185 && x < 10'd215) && anim_cnt == 0;
 
     /// Expired signal
-    assign pre_expired = (time_out > 10'd302) ? 1'b1 : 1'b0;
+    assign pre_expired = (time_out > 10'd210) ? 1'b1 : 1'b0;
     onepulse op_expired (.s_op(expired), .s(pre_expired), .clk(vsync));
     always @(posedge clk) begin         // Time_out signal
         if(rst)             time_out <= 0;
@@ -452,6 +453,55 @@ module ok_mem_addr_gen (
         end
         else
             ok_efx <= ok_efx;
+    end
+
+endmodule
+
+module bad_mem_addr_gen (
+    input clk, 
+    input clk_25MHz, 
+    input rst,
+    input vsync,
+    input [10-1:0] h_cnt,
+    input [10-1:0] v_cnt,
+
+    input request,
+
+    output reg bad,
+    output reg [10-1:0] bad_pixel_addr
+);
+
+    localparam x1 = 149,
+               y1 = 108,
+               x2 = 180,
+               y2 = 139;     /// For "bad"
+    
+
+    reg [7-1:0] counter;
+    always @(posedge clk) begin
+        if(rst || counter >= 7'd61)
+            counter <= 0;
+        else if(vsync & request)
+            counter <= 1;
+        else if(vsync && counter > 0)
+            counter <= counter + 6;
+        else 
+            counter <= counter;
+    end
+
+    always @(posedge clk) begin
+        if(rst) begin
+            bad_pixel_addr <= 0;
+        end
+        else begin
+            bad_pixel_addr <= (h_cnt - x1) + ((v_cnt - y1)<<5); 
+        end
+    end 
+    always @* begin
+        if( (h_cnt >= x1 && h_cnt <= x2) && (v_cnt >= y1 && v_cnt <= y2) && counter != 0)
+            bad = 1;
+        else 
+            bad = 0;
     end
 
 endmodule

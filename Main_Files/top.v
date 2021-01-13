@@ -32,43 +32,49 @@ module top(
     /// </Color Wires>
     wire [16-1:0] slide_pixel_addr;                         // 512*96
     wire [2-1:0]  pre_slide_pixel; 
-    wire [12-1:0] pre_do_pixel_addr [0:8-1];
-    wire [12-1:0] pre_ka_pixel_addr [0:8-1];
+    wire [12-1:0] pre_do_pixel_addr [0:16-1];
+    wire [12-1:0] pre_ka_pixel_addr [0:16-1];
     wire [12-1:0] do_pixel_addr, ka_pixel_addr;             // 4096
     wire [14-1:0] good_efx_pixel_addr, ok_efx_pixel_addr;   // 96*96 = 9216
     wire [10-1:0] good_pixel_addr;                          // 60*32 = 1920, v2 = 32*32
-    wire [10-1:0] ok_pixel_addr;                            // 60*32 = 1920
+    wire [10-1:0] ok_pixel_addr;                            // 32*32 = 1024
+    wire [10-1:0] bad_pixel_addr;                           // 32*32 = 1024
     wire [14-1:0] ui_pixel_addr;                            // 128*96= 12288
     wire [17-1:0] background_pixel_addr;                    // 76800
     wire [13-1:0] combo_pixel_addr;                         // 160*32
     wire [7-1:0]  pre_background_pixel; 
 
-    wire [12-1:0] slide_pixel, good_efx_pixel, good_pixel, ok_efx_pixel, ok_pixel, 
+    wire [12-1:0] slide_pixel, good_efx_pixel, good_pixel, ok_efx_pixel, ok_pixel, bad_pixel,
                   do_pixel, ka_pixel,
                   ui_pixel, background_pixel, combo_pixel;
     reg  [12-1:0] color;
 
     wire ui;
-    wire slide, good_efx, good, ok_efx, ok, combo;
-    wire [ 8-1:0] pre_do, pre_ka;
+    wire slide, good_efx, good, ok_efx, ok, combo, bad;
+    wire [16-1:0] pre_do, pre_ka;
     wire do, ka;
 
 
     /// <Note gen>
     /// 
     /// </Note gen>
-    reg [8-1:0] do_cnt,             ka_cnt;
-    reg [3-1:0] do_head, do_tail,   ka_head, ka_tail;
-    reg [4-1:0] do_init,            ka_init;                // 0 means no init, 1~8 means init a note (0~7)
-    wire[8-1:0] pre_do_expired,     pre_ka_expired;
+    reg [16-1:0] do_cnt,             ka_cnt;
+    reg [4-1:0]  do_head, do_tail,   ka_head, ka_tail;
+    reg [5-1:0]  do_init,            ka_init;                // 0 means no init, 1~16 means init a note (0~15)
+    wire[16-1:0] pre_do_expired,     pre_ka_expired;
     wire do_expired,                ka_expired;
     wire do_request,                ka_request;
-    wire[8-1:0] pre_do_good_hit,    pre_ka_good_hit;
+
+    wire[16-1:0] pre_do_good_hit,    pre_ka_good_hit;
     wire do_good_hit,               ka_good_hit;
-    wire[8-1:0] pre_do_ok_hit,      pre_ka_ok_hit;
+    wire[16-1:0] pre_do_ok_hit,      pre_ka_ok_hit;
     wire do_ok_hit,                 ka_ok_hit;
-    wire pre_do_hit_1, pre_do_hit_2,pre_ka_hit_1, pre_ka_hit_2;
-    wire do_hit_1, do_hit_2,        ka_hit_1, ka_hit_2;
+    wire[16-1:0] pre_do_bad_hit,      pre_ka_bad_hit;
+    wire do_bad_hit,                 ka_bad_hit;
+    wire pre_do_hit_1, pre_do_hit_2, pre_do_hit_3;
+    wire pre_ka_hit_1, pre_ka_hit_2, pre_ka_hit_3;
+    wire do_hit_1, do_hit_2, do_hit_3;
+    wire ka_hit_1, ka_hit_2, ka_hit_3;
 
     assign do_good_hit = |pre_do_good_hit;
     assign ka_good_hit = |pre_ka_good_hit;
@@ -78,6 +84,11 @@ module top(
     assign ka_ok_hit = |pre_ka_ok_hit;
     assign pre_do_hit_2 = (do_ok_hit & left);
     assign pre_ka_hit_2 = (ka_ok_hit & right);
+    assign do_bad_hit = |pre_do_bad_hit;
+    assign ka_bad_hit = |pre_ka_bad_hit;
+    assign pre_do_hit_3 = (do_bad_hit & left);
+    assign pre_ka_hit_3 = (ka_bad_hit & right);
+
 
     /// <Note gen>
     /// 
@@ -90,7 +101,8 @@ module top(
             if( (do_hit_1 | do_hit_2) |
                 (ka_hit_1 | ka_hit_2) )
                 streak <= streak + 4'b1;
-            else if(do_expired | ka_expired)
+            else if( (do_expired | ka_expired) | 
+                     (do_hit_3 | ka_hit_3) )
                 streak <= 4'b0;
             else 
                 streak <= streak;
@@ -107,6 +119,8 @@ module top(
     onepulse_lengthen ople_ka1 (.s_op(ka_hit_1), .s(pre_ka_hit_1), .clk(clk), .vsync(op_vsync)); 
     onepulse_lengthen ople_do2 (.s_op(do_hit_2), .s(pre_do_hit_2), .clk(clk), .vsync(op_vsync)); 
     onepulse_lengthen ople_ka2 (.s_op(ka_hit_2), .s(pre_ka_hit_2), .clk(clk), .vsync(op_vsync)); 
+    onepulse_lengthen ople_do3 (.s_op(do_hit_3), .s(pre_do_hit_3), .clk(clk), .vsync(op_vsync)); 
+    onepulse_lengthen ople_ka3 (.s_op(ka_hit_3), .s(pre_ka_hit_3), .clk(clk), .vsync(op_vsync)); 
     do_ka_cnt               temp_do_note_gen(               // Output note every 2^n /60 seconds, according to my kimochi
         .clk(clk),
         .rst(rst),
@@ -116,9 +130,9 @@ module top(
     reg do_expired_flag, ka_expired_flag;   // Avoid double hit
     always @(posedge clk) begin         // Enable and disable do notes
         if(rst) begin
-            do_cnt <= 8'b0;
-            do_head<= 3'b0;
-            do_tail<= 3'b0;
+            do_cnt <= 16'b0;
+            do_head<= 4'b0;
+            do_tail<= 4'b0;
             do_expired_flag <= 0;
         end
         else if(op_vsync) begin
@@ -127,7 +141,7 @@ module top(
                 do_head <= do_head + 1;
                 do_expired_flag <= 0;
             end
-            else if( (do_expired | do_hit_1 | do_hit_2) && (do_tail != do_head && !do_expired_flag) ) begin
+            else if( ( (do_expired | do_hit_1) | (do_hit_2 | do_hit_3) ) && (do_tail != do_head && !do_expired_flag) ) begin
                 do_cnt[do_tail] <= 1'b0;
                 do_tail <= do_tail + 1;
                 do_expired_flag <= 1;
@@ -147,18 +161,18 @@ module top(
         end
     end
     always @(posedge clk) begin         // Enable and initiate do's pos
-        if(rst)             do_init <= 4'd0;
+        if(rst)             do_init <= 5'd0;
         else if(op_vsync) begin
-            if(do_request)  do_init <= {1'b0, do_head} + 4'b1;
-            else            do_init <= 4'b0;
+            if(do_request)  do_init <= {1'b0, do_head} + 5'b1;
+            else            do_init <= 5'b0;
         end
         else                do_init <= do_init;
     end
     always @(posedge clk) begin         // Enable and disable ka notes
         if(rst) begin
-            ka_cnt <= 8'b0;
-            ka_head<= 3'b0;
-            ka_tail<= 3'b0;
+            ka_cnt <= 16'b0;
+            ka_head<= 4'b0;
+            ka_tail<= 4'b0;
             ka_expired_flag <= 0;
         end
         else if(op_vsync) begin
@@ -167,7 +181,7 @@ module top(
                 ka_head <= ka_head + 1;
                 ka_expired_flag <= 0;
             end
-            else if( (ka_expired | ka_hit_1 | ka_hit_2) && (ka_tail != ka_head && !ka_expired_flag) ) begin
+            else if( ( (ka_expired | ka_hit_1) | (ka_hit_2 | ka_hit_3) ) && (ka_tail != ka_head && !ka_expired_flag) ) begin
                 ka_cnt[ka_tail] <= 1'b0;
                 ka_tail <= ka_tail + 1;
                 ka_expired_flag <= 1;
@@ -187,10 +201,10 @@ module top(
         end
     end
     always @(posedge clk) begin         // Enable and initiate ka's pos
-        if(rst)             ka_init <= 4'd0;
+        if(rst)             ka_init <= 5'd0;
         else if(op_vsync) begin
-            if(ka_request)  ka_init <= {1'b0, ka_head} + 4'b1;
-            else            ka_init <= 4'b0;
+            if(ka_request)  ka_init <= {1'b0, ka_head} + 5'b1;
+            else            ka_init <= 5'b0;
         end
         else                ka_init <= ka_init;
     end
@@ -198,11 +212,15 @@ module top(
     assign do            = |pre_do;
     assign do_expired    = |pre_do_expired;
     assign do_pixel_addr = ( (pre_do_pixel_addr[0] | pre_do_pixel_addr[1]) | (pre_do_pixel_addr[2] | pre_do_pixel_addr[3]) ) |
-                           ( (pre_do_pixel_addr[4] | pre_do_pixel_addr[5]) | (pre_do_pixel_addr[6] | pre_do_pixel_addr[7]) );
+                           ( (pre_do_pixel_addr[4] | pre_do_pixel_addr[5]) | (pre_do_pixel_addr[6] | pre_do_pixel_addr[7]) ) |
+                           ( (pre_do_pixel_addr[8] | pre_do_pixel_addr[9]) | (pre_do_pixel_addr[10]| pre_do_pixel_addr[11])) |
+                           ( (pre_do_pixel_addr[12]| pre_do_pixel_addr[13])| (pre_do_pixel_addr[14]| pre_do_pixel_addr[15]));
     assign ka            = |pre_ka;
     assign ka_expired    = |pre_ka_expired;
     assign ka_pixel_addr = ( (pre_ka_pixel_addr[0] | pre_ka_pixel_addr[1]) | (pre_ka_pixel_addr[2] | pre_ka_pixel_addr[3]) ) |
-                           ( (pre_ka_pixel_addr[4] | pre_ka_pixel_addr[5]) | (pre_ka_pixel_addr[6] | pre_ka_pixel_addr[7]) );
+                           ( (pre_ka_pixel_addr[4] | pre_ka_pixel_addr[5]) | (pre_ka_pixel_addr[6] | pre_ka_pixel_addr[7]) ) |
+                           ( (pre_ka_pixel_addr[8] | pre_ka_pixel_addr[9]) | (pre_ka_pixel_addr[10]| pre_ka_pixel_addr[11])) |
+                           ( (pre_ka_pixel_addr[12]| pre_ka_pixel_addr[13])| (pre_ka_pixel_addr[14]| pre_ka_pixel_addr[15]));
 
 
     /// <Color>
@@ -219,9 +237,11 @@ module top(
                 color = do_pixel;
             else if(ka   && ka_pixel != 12'hf6f)
                 color = ka_pixel;
-            else if(good && good_pixel != 12'hf6f) 
+            else if(bad) 
+                color = bad_pixel;
+            else if(good) 
                 color = good_pixel;
-            else if(ok   && ok_pixel != 12'hf6f) 
+            else if(ok) 
                 color = ok_pixel;
             else if(good_efx) 
                 color = good_efx_pixel;
@@ -339,15 +359,15 @@ module top(
     /// 
     /// </Do>
 generate    
-    for (j = 0; j < 8; j = j+1) begin
-    do_mem_addr_gen #(.H_SIZE(32), .SPEED(2), .NUM(j)) do_mem_addr_gen_inst(
+    for (j = 0; j < 16; j = j+1) begin
+    do_mem_addr_gen #(.H_SIZE(32), .SPEED(3), .NUM(j)) do_mem_addr_gen_inst(
         .clk(clk), 
         .rst(rst),
         .vsync(op_vsync),
         .h_cnt(h_cnt),
         .v_cnt(v_cnt),
 
-        .do_cnt(do_cnt[j]),             // 0~7, total of 8 objects, 1 means on the track
+        .do_cnt(do_cnt[j]),             // 0~15, total of 8 objects, 1 means on the track
         .been_hit(do_hit_1 | do_hit_2),
         .init(do_init),
 
@@ -355,6 +375,7 @@ generate
         .do(pre_do[j]),                 // x, y = slide x1 + 37, y1 + 12
         .good_hit(pre_do_good_hit[j]),
         .ok_hit(pre_do_ok_hit[j]),
+        .bad_hit(pre_do_bad_hit[j]),
         .do_pixel_addr(pre_do_pixel_addr[j])
     );
     end 
@@ -372,8 +393,8 @@ endgenerate
     /// 
     /// </Ka>
 generate    
-    for (j = 0; j < 8; j = j+1) begin
-    do_mem_addr_gen #(.H_SIZE(32), .SPEED(2), .NUM(j)) ka_mem_addr_gen_inst(
+    for (j = 0; j < 16; j = j+1) begin
+    do_mem_addr_gen #(.H_SIZE(32), .SPEED(3), .NUM(j)) ka_mem_addr_gen_inst(
         .clk(clk), 
         .rst(rst),
         .vsync(op_vsync),
@@ -388,6 +409,7 @@ generate
         .do(pre_ka[j]),                 // x, y = slide x1 + 37, y1 + 12
         .good_hit(pre_ka_good_hit[j]),
         .ok_hit(pre_ka_ok_hit[j]),
+        .bad_hit(pre_ka_bad_hit[j]),
         .do_pixel_addr(pre_ka_pixel_addr[j])
     );
     end 
@@ -466,6 +488,31 @@ endgenerate
         .addra(ok_efx_pixel_addr),
         .dina(data),
         .douta(ok_efx_pixel)
+    );
+
+
+    /// <Bad>
+    /// 
+    /// </Bad>
+    bad_mem_addr_gen         bad_mem_addr_gen_inst(
+        .clk(clk),
+        .clk_25MHz(op_clk_25MHz),
+        .rst(rst),
+        .vsync(op_vsync),
+        .h_cnt(h_cnt),
+        .v_cnt(v_cnt),
+
+        .request(do_hit_3 | ka_hit_3),
+
+        .bad(bad),
+        .bad_pixel_addr(bad_pixel_addr)
+    );
+    blk_mem_gen_10           bad_inst(
+        .clka(clk_25MHz),
+        .wea(0),
+        .addra(bad_pixel_addr),
+        .dina(data),
+        .douta(bad_pixel)
     );
 
 
