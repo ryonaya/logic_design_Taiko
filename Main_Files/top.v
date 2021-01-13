@@ -17,7 +17,8 @@ module top(
     wire left, right;
     wire [12-1:0] data;
     wire [2-1:0] data_2b;
-    wire clk_25MHz;
+    wire [7-1:0] data_7b;
+    wire clk_25MHz, op_clk_25MHz;
     wire [10-1:0] h_cnt;    //640
     wire [10-1:0] v_cnt;    //480
     wire valid;
@@ -30,23 +31,25 @@ module top(
     /// 
     /// </Color Wires>
     wire [16-1:0] slide_pixel_addr;                         // 512*96
+    wire [2-1:0]  pre_slide_pixel; 
     wire [12-1:0] pre_do_pixel_addr [0:8-1];
     wire [12-1:0] pre_ka_pixel_addr [0:8-1];
     wire [12-1:0] do_pixel_addr, ka_pixel_addr;             // 4096
     wire [14-1:0] good_efx_pixel_addr, ok_efx_pixel_addr;   // 96*96 = 9216
-    wire [11-1:0] good_pixel_addr;                          // 60*32 = 1920
+    wire [10-1:0] good_pixel_addr;                          // 60*32 = 1920, v2 = 32*32
     wire [10-1:0] ok_pixel_addr;                            // 60*32 = 1920
     wire [14-1:0] ui_pixel_addr;                            // 128*96= 12288
     wire [17-1:0] background_pixel_addr;                    // 76800
+    wire [13-1:0] combo_pixel_addr;                         // 160*32
+    wire [7-1:0]  pre_background_pixel; 
 
-    wire [2-1:0]  pre_slide_pixel; 
     wire [12-1:0] slide_pixel, good_efx_pixel, good_pixel, ok_efx_pixel, ok_pixel, 
                   do_pixel, ka_pixel,
-                  ui_pixel, background_pixel;
+                  ui_pixel, background_pixel, combo_pixel;
     reg  [12-1:0] color;
 
     wire ui;
-    wire slide, good_efx, good, ok_efx, ok;
+    wire slide, good_efx, good, ok_efx, ok, combo;
     wire [ 8-1:0] pre_do, pre_ka;
     wire do, ka;
 
@@ -76,6 +79,27 @@ module top(
     assign pre_do_hit_2 = (do_ok_hit & left);
     assign pre_ka_hit_2 = (ka_ok_hit & right);
 
+    /// <Note gen>
+    /// 
+    /// </Note gen>
+    reg [10-1:0] streak;
+    always @(posedge clk) begin
+        if(rst)             
+            streak <= 4'd0;
+        else if(op_vsync) begin
+            if( (do_hit_1 | do_hit_2) |
+                (ka_hit_1 | ka_hit_2) )
+                streak <= streak + 4'b1;
+            else if(do_expired | ka_expired)
+                streak <= 4'b0;
+            else 
+                streak <= streak;
+        end
+        else                
+            streak <= streak;
+    end
+
+
     /// <Do Ka Gen>
     /// 
     /// </Do Ka Gen>
@@ -89,7 +113,7 @@ module top(
         .vsync(op_vsync),
         .request({ka_request, do_request})
     );
-    reg do_expired_flag, ka_expired_flag;
+    reg do_expired_flag, ka_expired_flag;   // Avoid double hit
     always @(posedge clk) begin         // Enable and disable do notes
         if(rst) begin
             do_cnt <= 8'b0;
@@ -187,7 +211,9 @@ module top(
     assign {vgaRed, vgaGreen, vgaBlue} = color;
     always @* begin         // Layering
         if(valid) begin
-            if     (ui)
+            if     (combo && combo_pixel != 12'hfff)
+                color = combo_pixel;
+            else if(ui)
                 color = ui_pixel;
             else if(do   && do_pixel != 12'hf6f)
                 color = do_pixel;
@@ -256,25 +282,29 @@ module top(
     /// <Background>
     /// 
     /// </Background>
-    background_mem_addr_gen      background_mem_addr_gen_inst(
+    background_mem_addr_gen         background_mem_addr_gen_inst(
         .h_cnt(h_cnt),
         .v_cnt(v_cnt),
 
         .background_pixel_addr(background_pixel_addr)
     );
-    blk_mem_gen_7           background_inst(
+    blk_mem_gen_7                   background_inst(
         .clka(clk_25MHz),
         .wea(0),
         .addra(background_pixel_addr),
-        .dina(data),
-        .douta(background_pixel)
+        .dina(data_7b),
+        .douta(pre_background_pixel)
+    );
+    background_pixel_decode         background_decode(
+        .pre_background_pixel(pre_background_pixel),
+        .background_pixel(background_pixel)
     );
 
-
     /// <UI>
-    /// 
+    /// Numbers in combo (x1, y1) = (80->96->112, 145)
+    /// When only two digit :       (88->104    , 145)
     /// </UI>
-    ui_mem_addr_gen      ui_mem_addr_gen_inst(
+    ui_mem_addr_gen         ui_mem_addr_gen_inst(
         .h_cnt(h_cnt),
         .v_cnt(v_cnt),
 
@@ -288,7 +318,22 @@ module top(
         .dina(data),
         .douta(ui_pixel)
     );
+    combo_mem_addr_gen      combo_mem_addr_gen_inst(
+        .h_cnt(h_cnt),
+        .v_cnt(v_cnt),
 
+        .streak(streak),
+
+        .combo(combo),
+        .combo_pixel_addr(combo_pixel_addr)
+    );
+    blk_mem_gen_9           combo_inst(
+        .clka(clk_25MHz),
+        .wea(0),
+        .addra(combo_pixel_addr),
+        .dina(data),
+        .douta(combo_pixel)
+    );
 
     /// <Do>
     /// 
@@ -303,6 +348,7 @@ generate
         .v_cnt(v_cnt),
 
         .do_cnt(do_cnt[j]),             // 0~7, total of 8 objects, 1 means on the track
+        .been_hit(do_hit_1 | do_hit_2),
         .init(do_init),
 
         .expired(pre_do_expired[j]),
@@ -335,6 +381,7 @@ generate
         .v_cnt(v_cnt),
 
         .do_cnt(ka_cnt[j]),             // 0~7, total of 8 objects, 1 means on the track
+        .been_hit(ka_hit_1 | ka_hit_2),
         .init(ka_init),
 
         .expired(pre_ka_expired[j]),
@@ -359,6 +406,7 @@ endgenerate
     /// </Good Effect>
     good_efx_mem_addr_gen   good_efx_mem_addr_gen_inst(
         .clk(clk),
+        .clk_25MHz(op_clk_25MHz),
         .rst(rst),
         .vsync(op_vsync),
         .h_cnt(h_cnt),
@@ -392,12 +440,13 @@ endgenerate
     /// </OK>
     ok_mem_addr_gen         ok_mem_addr_gen_inst(
         .clk(clk),
+        .clk_25MHz(op_clk_25MHz),
         .rst(rst),
         .vsync(op_vsync),
         .h_cnt(h_cnt),
         .v_cnt(v_cnt),
 
-        .request(do_hit_2 | ka_hit_2),
+        .request(do_hit_2 | ka_hit_2 & !(do_hit_1 | ka_hit_1)),
 
         .ok_efx(ok_efx),
         .ok(ok),
@@ -426,6 +475,7 @@ endgenerate
     onepulse opvsync (.s_op(op_vsync), .s(vsync),       .clk(clk));
     debounce dbrst   (.s_db(db_rst),   .s(pre_rst),     .clk(clk));
     onepulse oprst   (.s_op(rst),      .s(db_rst),      .clk(clk));
-    debounce dbleft  (.s_db(left),  .s(pre_left),    .clk(clk));
-    debounce dbright (.s_db(right), .s(pre_right),   .clk(clk));
+    debounce dbleft  (.s_db(left),  .s(pre_left),       .clk(clk));
+    debounce dbright (.s_db(right), .s(pre_right),      .clk(clk));
+    onepulse op25M   (.s_op(op_clk_25MHz),.s(clk_25MHz),.clk(clk));
 endmodule
